@@ -6,12 +6,11 @@ language:
   - c
 
 compiler:
-  - gcc
   - clang
 
 branches:
   only:
-    - master
+    - coverity
 
 before_install:
   - sudo apt-get update -qq
@@ -52,7 +51,22 @@ before_install:
   - make -j2 && sudo make install
   - cd ../..
 
+env:
+  global:
+   # The next declaration is the encrypted COVERITY_SCAN_TOKEN, created
+   #   via the "travis encrypt" command using the project repo's public key
+   - secure: "HxbZfYJu51S1abMofvi5AKF+zwPpqgTnrlmkU3l/DTzxvEEgNUDnjBF5/4nhGZRBmeHpn2ZqQWkUvdJjoXujnfH2dEhZXnRjeH2rmAtB3SsZlCr1SXpb8VEUUC6KU2l8co5PaaLhEj5xHJ4KRVlh+yEAkeMJPiXWk4pD+KDzOAPJi3CLompy07XcsYCErGB7hXtnlkK7fDwRyxR83aDBKZHsxgHfHC4xJOgjRJmh/ggkHm1Lp8IljuXS5AB9V3GwXCebOIYdYvWJAW1yor5ZNRNQqxmglqQldHexvzSWDelotT7djU8hLKkDkrL1LhrpwLPLNtCPqQ3avX99SlfmUcKgd+XRRJ+i1HX2oKtsNsfL1BOeXKeNH7Z2moQGhVP0XMbrCWWOSZfMM7kquYvlT8ZW7TMQSgqbnOaoITGUfWgv7EXRQM5Wn+GfeSusr8e0L9gdlMucmpl9UGatjN4AHLovDSnMrwzP+kARewhwCI/yebnxknos6+ONQ62kXSn88nhfqTFIl6AKM3nuLVJa8z8ianbcld0fa+iCKuCYylyQyWIFEEIxb0A7Pkwtw59fJtutpRuGfKEPUU+U4On1p2gFYUHP0zNrPGKqNkx6qRwJQs2lIaYlAjuuSL1V/ZDq1u3kt4oZTQ3slqYcKSjZiEz93Bw8XAX7F+XT2fp6XSg="
+
+addons:
+  coverity_scan:
+    project:
+      name: "CESNET/Netopeer2"
+    notification_email: rkrejci@cesnet.cz
+    build_command_prepend: "mkdir build_cli && cd build_cli && cmake ../cli && mkdir ../build_server && cd ../build_server && cmake ../server"
+    build_command:   "make && cd ../cli && make"
+    branch_pattern: coverity
+
 script:
-  - mkdir build-cli && cd build-cli && cmake ../cli && make -j2
-  - mkdir ../build-server && cd ../build-server && cmake ../server && make -j2
+  # do nothing, everything here is done in coverity addon
+  - true
 
