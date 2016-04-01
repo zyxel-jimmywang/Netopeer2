@@ -62,8 +62,8 @@ addons:
     project:
       name: "CESNET/Netopeer2"
     notification_email: rkrejci@cesnet.cz
-    build_command_prepend: "mkdir build_cli && cd build_cli && cmake ../cli && mkdir ../build_server && cd ../build_server && cmake ../server"
-    build_command:   "make && cd ../cli && make"
+    build_command_prepend: "mkdir build_cli; cd build_cli; cmake ../cli; mkdir ../build_server; cd ../build_server; cmake ../server; cd .."
+    build_command: "cd build_cli; make; cd ../build_server; make"
     branch_pattern: coverity
 
 script:
