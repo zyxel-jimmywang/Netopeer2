@@ -63,7 +63,7 @@ addons:
       name: "CESNET/Netopeer2"
     notification_email: rkrejci@cesnet.cz
     build_command_prepend: "mkdir build_cli; cd build_cli; cmake ../cli; mkdir ../build_server; cd ../build_server; cmake ../server; cd .."
-    build_command: "./covbuild"
+    build_command: "./covbuild.sh"
     branch_pattern: coverity
 
 script:
