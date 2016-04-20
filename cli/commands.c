@@ -200,8 +200,8 @@ cli_ntf_clb(struct nc_session *session, const struct nc_notif *notif)
 static int
 cli_send_recv(struct nc_rpc *rpc, FILE *output)
 {
-    char *str, *model_data, *ptr, *ptr2;
-    int ret;
+    char *str, *model_data;
+    int ret = 0;
     uint16_t i, j;
     uint64_t msgid;
     NC_MSG_TYPE msgtype;
@@ -237,7 +237,6 @@ cli_send_recv(struct nc_rpc *rpc, FILE *output)
     switch (reply->type) {
     case NC_RPL_OK:
         fprintf(output, "OK\n");
-        ret = 0;
         break;
     case NC_RPL_DATA:
         data_rpl = (struct nc_reply_data *)reply;
@@ -247,22 +246,19 @@ cli_send_recv(struct nc_rpc *rpc, FILE *output)
             if (output == stdout) {
                 fprintf(output, "MODULE\n");
             }
-            ret = lyxml_print_mem(&str, ((struct lyd_node_anyxml *)data_rpl->data)->value, 0);
-            if (ret) {
-                ERROR(__func__, "Failed to get the model data from the reply.\n");
-                nc_reply_free(reply);
-                return 1;
+            if (((struct lyd_node_anyxml *)data_rpl->data)->xml_struct) {
+                ret = lyxml_print_mem(&model_data, ((struct lyd_node_anyxml *)data_rpl->data)->value.xml, 0);
+                if (ret) {
+                    ERROR(__func__, "Failed to get the model data from the reply.\n");
+                    nc_reply_free(reply);
+                    return 1;
+                }
+                fputs(model_data, output);
+                free(model_data);
+            } else {
+                fputs(((struct lyd_node_anyxml *)data_rpl->data)->value.str, output);
             }
 
-            ptr = strchr(str, '>');
-            ++ptr;
-            ptr2 = strrchr(str, '<');
-
-            model_data = strndup(ptr, strlen(ptr) - strlen(ptr2));
-            free(str);
-
-            fputs(model_data, output);
-            free(model_data);
             if (output == stdout) {
                 fprintf(output, "\n");
             }
@@ -276,7 +272,6 @@ cli_send_recv(struct nc_rpc *rpc, FILE *output)
         if (output == stdout) {
             fprintf(output, "\n");
         }
-        ret = 0;
         break;
     case NC_RPL_ERROR:
         fprintf(output, "ERROR\n");
