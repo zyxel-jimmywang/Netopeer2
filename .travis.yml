@@ -17,6 +17,12 @@ before_install:
   - sudo apt-get install -y libavl-dev libev-dev
   - sudo apt-get install -y zlib1g-dev libssl-dev
 
+  - wget https://cmocka.org/files/1.0/cmocka-1.0.1.tar.xz
+  - tar -xJvf cmocka-1.0.1.tar.xz
+  - cd cmocka-1.0.1 && mkdir build && cd build
+  - cmake -DCMAKE_INSTALL_PREFIX:PATH=/usr .. && make -j2 && sudo make install
+  - cd ../..
+
   - git clone https://github.com/CESNET/libyang.git
   - cd libyang; mkdir build; cd build
   - cmake -DCMAKE_INSTALL_PREFIX:PATH=/usr -DCMAKE_BUILD_TYPE=Release ..
@@ -67,9 +73,8 @@ addons:
     branch_pattern: coverity
 
 script:
-  # do nothing, everything here is done in coverity addon
-  - true
+  - mkdir build-server && cd build-server && cmake ../server && make -j2 && make test
 
 after_success:
-  - if [ "${CC}" = "gcc" ]; bash <(curl -s https://codecov.io/bash); fi
+  - if [ "${CC}" = "gcc" ]; then bash <(curl -s https://codecov.io/bash); fi
 
