@@ -73,8 +73,6 @@ addons:
     branch_pattern: coverity
 
 script:
-  - mkdir build-server && cd build-server && cmake ../server && make -j2 && make test
-
-after_success:
-  - if [ "${CC}" = "gcc" ]; then bash <(curl -s https://codecov.io/bash); fi
+  # do nothing, everything here is done in coverity addon
+  - true
 
