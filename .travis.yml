@@ -70,3 +70,6 @@ script:
   # do nothing, everything here is done in coverity addon
   - true
 
+after_success:
+  - if [ "${CC}" = "gcc" ]; bash <(curl -s https://codecov.io/bash); fi
+
