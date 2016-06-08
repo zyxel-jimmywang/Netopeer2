@@ -13,6 +13,7 @@
  */
 
 #include <errno.h>
+#include <execinfo.h>
 #include <fcntl.h>
 #include <pthread.h>
 #include <signal.h>
@@ -93,6 +94,11 @@ print_usage(char* progname)
 void
 signal_handler(int sig)
 {
+#ifdef DEBUG
+#   define STACK_DEPTH 20
+    void *stack_buf[STACK_DEPTH];
+    int depth;
+#endif
     static int quit = 0;
 
     switch (sig) {
@@ -115,9 +121,15 @@ signal_handler(int sig)
         /* restart the process */
         control = LOOP_RESTART;
         break;
+#ifdef DEBUG
+    case SIGSEGV:
+        depth = backtrace(stack_buf, STACK_DEPTH);
+        fprintf(stderr, "Segmentation fault, backtrace:\n");
+        backtrace_symbols_fd(stack_buf, depth, STDERR_FILENO);
+        /* fall through */
+#endif
     default:
         exit(EXIT_FAILURE);
-        break;
     }
 }
 
@@ -504,6 +516,7 @@ main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
     if (lockf(pidfd, F_TLOCK, 0) < 0) {
+        close(pidfd);
         if (errno == EACCES || errno == EAGAIN) {
             ERR("Another instance of the Netopeer2 server is running.");
         } else {
@@ -514,6 +527,7 @@ main(int argc, char *argv[])
     ftruncate(pidfd, 0);
     c = snprintf(pid, sizeof(pid), "%d\n", getpid());
     write(pidfd, pid, c);
+    close(pidfd);
 
     /* set the signal handler */
     sigfillset (&block_mask);
@@ -526,6 +540,9 @@ main(int argc, char *argv[])
     sigaction(SIGTERM, &action, NULL);
     sigaction(SIGHUP, &action, NULL);
     sigaction(SIGUSR1, &action, NULL);
+#ifdef DEBUG
+    sigaction(SIGSEGV, &action, NULL);
+#endif
     /* ignore SIGPIPE */
     action.sa_handler = SIG_IGN;
     sigaction(SIGPIPE, &action, NULL);

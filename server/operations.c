@@ -12,6 +12,8 @@
  *     https://opensource.org/licenses/BSD-3-Clause
  */
 
+#include <assert.h>
+#include <inttypes.h>
 #include <string.h>
 #include <sysrepo.h>
 
@@ -58,7 +60,7 @@ op_get_srval(struct ly_ctx *ctx, sr_val_t *value, char *buf)
         sprintf(buf, "%u", value->data.uint32_val);
         return buf;
     case SR_UINT64_T:
-        sprintf(buf, "%lu", value->data.uint64_val);
+        sprintf(buf, "%"PRIu64, value->data.uint64_val);
         return buf;
     case SR_INT8_T:
         sprintf(buf, "%d", value->data.int8_val);
@@ -70,7 +72,7 @@ op_get_srval(struct ly_ctx *ctx, sr_val_t *value, char *buf)
         sprintf(buf, "%d", value->data.int32_val);
         return buf;
     case SR_INT64_T:
-        sprintf(buf, "%ld", value->data.int64_val);
+        sprintf(buf, "%"PRId64, value->data.int64_val);
         return buf;
     default:
         return NULL;
@@ -117,11 +119,16 @@ copy_bits(const struct lyd_node_leaf_list *leaf, char **dest)
 }
 
 int
-op_set_srval(struct lyd_node *node, char *path, int dup, sr_val_t *val)
+op_set_srval(struct lyd_node *node, char *path, int dup, sr_val_t *val, char **val_buf)
 {
     uint32_t i;
     struct lyd_node_leaf_list *leaf;
     const char *str;
+
+    if (!dup) {
+        assert(val_buf);
+        (*val_buf) = NULL;
+    }
 
     val->xpath = (dup && path) ? strdup(path) : path;
     val->dflt = 0;
@@ -196,6 +203,9 @@ op_set_srval(struct lyd_node *node, char *path, int dup, sr_val_t *val)
                 }
                 sprintf((char *)str, "%s:%s", lys_main_module(leaf->value.ident->module)->name, leaf->value.ident->name);
                 val->data.identityref_val = (char *)str;
+                if (!dup) {
+                    (*val_buf) = (char *)str;
+                }
             }
             break;
         case LY_TYPE_INST:

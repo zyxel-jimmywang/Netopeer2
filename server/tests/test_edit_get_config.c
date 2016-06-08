@@ -226,7 +226,7 @@ __wrap_sr_get_item_next(sr_session_ctx_t *session, sr_val_iter_t *iter, sr_val_t
 
         path = lyd_path(ietf_if_set->set.d[0]);
         *value = malloc(sizeof **value);
-        op_set_srval(ietf_if_set->set.d[0], path, 1, *value);
+        op_set_srval(ietf_if_set->set.d[0], path, 1, *value, NULL);
         free(path);
 
         --ietf_if_set->number;
@@ -268,20 +268,20 @@ __wrap_sr_set_item(sr_session_ctx_t *session, const char *xpath, const sr_val_t 
     case SR_CONTAINER_T:
     case SR_CONTAINER_PRESENCE_T:
     case SR_LEAF_EMPTY_T:
-        ly_errno = LYVE_SUCCESS;
+        ly_errno = LY_SUCCESS;
         lyd_new_path(data, np2srv.ly_ctx, xpath, NULL, opt);
         if ((ly_errno == LY_EVALID) && (ly_vecode == LYVE_PATH_EXISTS)) {
             return SR_ERR_DATA_EXISTS;
         }
-        assert_int_equal(ly_errno, LYVE_SUCCESS);
+        assert_int_equal(ly_errno, LY_SUCCESS);
         break;
     default:
-        ly_errno = LYVE_SUCCESS;
+        ly_errno = LY_SUCCESS;
         lyd_new_path(data, np2srv.ly_ctx, xpath, op_get_srval(np2srv.ly_ctx, (sr_val_t *)value, buf), opt);
         if ((ly_errno == LY_EVALID) && (ly_vecode == LYVE_PATH_EXISTS)) {
             return SR_ERR_DATA_EXISTS;
         }
-        assert_int_equal(ly_errno, LYVE_SUCCESS);
+        assert_int_equal(ly_errno, LY_SUCCESS);
         break;
     }
 
@@ -446,7 +446,6 @@ __wrap_nc_server_ssh_endpt_set_hostkey(const char *endpt_name, const char *privk
 NC_MSG_TYPE
 __wrap_nc_accept(int timeout, struct nc_session **session)
 {
-    (void)timeout;
     NC_MSG_TYPE ret;
 
     if (!initialized) {
@@ -479,6 +478,7 @@ __wrap_nc_accept(int timeout, struct nc_session **session)
         initialized = 1;
         ret = NC_MSG_HELLO;
     } else {
+        usleep(timeout * 1000);
         ret = NC_MSG_WOULDBLOCK;
     }
 
@@ -1387,5 +1387,8 @@ main(void)
                     cmocka_unit_test_teardown(test_edit_merge, np_stop),
     };
 
+    if (setenv("CMOCKA_TEST_ABORT", "1", 1)) {
+        fprintf(stderr, "Cannot set Cmocka thread environment variable.\n");
+    }
     return cmocka_run_group_tests(tests, NULL, NULL);
 }

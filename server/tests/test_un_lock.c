@@ -252,7 +252,6 @@ __wrap_nc_server_ssh_endpt_set_hostkey(const char *endpt_name, const char *privk
 NC_MSG_TYPE
 __wrap_nc_accept(int timeout, struct nc_session **session)
 {
-    (void)timeout;
     NC_MSG_TYPE ret;
 
     if (!initialized) {
@@ -285,6 +284,7 @@ __wrap_nc_accept(int timeout, struct nc_session **session)
         initialized = 1;
         ret = NC_MSG_HELLO;
     } else {
+        usleep(timeout * 1000);
         ret = NC_MSG_WOULDBLOCK;
     }
 
@@ -566,5 +566,8 @@ main(void)
                     cmocka_unit_test_teardown(test_unlock2, np_stop),
     };
 
+    if (setenv("CMOCKA_TEST_ABORT", "1", 1)) {
+        fprintf(stderr, "Cannot set Cmocka thread environment variable.\n");
+    }
     return cmocka_run_group_tests(tests, NULL, NULL);
 }
