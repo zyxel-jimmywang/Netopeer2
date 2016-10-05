@@ -14,43 +14,10 @@ branches:
 
 cache:
   directories:
+    - cmocka-1.0.1
     - libssh-0.7.3
     - protobuf
     - protobuf-c
-
-  - wget https://red.libssh.org/attachments/download/195/libssh-0.7.3.tar.xz
-  - tar -xJf libssh-0.7.3.tar.xz
-  - mkdir libssh-0.7.3/build && cd libssh-0.7.3/build
-  - cmake -DCMAKE_INSTALL_PREFIX:PATH=/usr .. && make -j2 && sudo make install
-  - cd ../..
-
-  - wget https://red.libssh.org/attachments/download/177/libssh-0.7.2.tar.xz
-  - tar -xJf libssh-0.7.2.tar.xz
-  - mkdir libssh-0.7.2/build && cd libssh-0.7.2/build
-  - cmake -DCMAKE_INSTALL_PREFIX:PATH=/usr .. && make -j2 && sudo make install
-  - cd ../..
-
-  - git clone https://github.com/CESNET/libnetconf2.git
-  - cd libnetconf2; mkdir build; cd build
-  - cmake -DCMAKE_INSTALL_PREFIX:PATH=/usr -DCMAKE_BUILD_TYPE=Release ..
-  - make -j2 && sudo make install
-  - cd ../..
-
-  - git clone https://github.com/google/protobuf.git
-  - cd protobuf
-  - ./autogen.sh && ./configure --prefix=/usr && make -j2 && sudo make install
-  - cd ..
-
-  - git clone https://github.com/protobuf-c/protobuf-c.git
-  - cd protobuf-c
-  - ./autogen.sh && ./configure --prefix=/usr && make -j2 && sudo make install
-  - cd ..
-
-  - git clone https://github.com/sysrepo/sysrepo.git
-  - cd sysrepo; mkdir build; cd build
-  - cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX:PATH=/usr -DREPOSITORY_LOC:PATH=/etc/sysrepo ..
-  - make -j2 && sudo make install
-  - cd ../..
 
 env:
   global:
@@ -66,6 +33,10 @@ addons:
     build_command_prepend: "mkdir build_cli; cd build_cli; cmake ../cli; mkdir ../build_server; cd ../build_server; cmake ../server; cd .."
     build_command: "./covbuild.sh"
     branch_pattern: coverity
+
+before_install;
+  - echo -n | openssl s_client -connect scan.coverity.com:443 | sed -ne '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' | sudo tee -a /etc/ssl/certs/ca-certificates.crt
+  - bash .travis-install-libs.sh
 
 script:
   # do nothing, everything here is done in coverity addon
