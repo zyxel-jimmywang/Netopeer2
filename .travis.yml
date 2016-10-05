@@ -34,7 +34,7 @@ addons:
     build_command: "./covbuild.sh"
     branch_pattern: coverity
 
-before_install;
+before_install:
   - echo -n | openssl s_client -connect scan.coverity.com:443 | sed -ne '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' | sudo tee -a /etc/ssl/certs/ca-certificates.crt
   - bash .travis-install-libs.sh
 
