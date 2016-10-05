@@ -13,7 +13,9 @@
  */
 
 #include <errno.h>
-#include <execinfo.h>
+#ifdef DEBUG
+    #include <execinfo.h>
+#endif
 #include <fcntl.h>
 #include <pthread.h>
 #include <signal.h>
@@ -139,13 +141,13 @@ np2srv_ly_module_clb(const char *name, const char *revision, void *user_data, LY
 {
     char *data = NULL;
 
-    *free_module_data = NULL;
+    *free_module_data = free;
     *format = LYS_IN_YIN;
     if (sr_get_schema(np2srv.sr_sess.srs, name, revision, NULL, SR_SCHEMA_YIN, &data) == SR_ERR_OK) {
         /* import */
         return data;
-    } else if (sr_get_schema(np2srv.sr_sess.srs, (const char *)user_data, revision, name,
-                             SR_SCHEMA_YIN, &data) == SR_ERR_OK) {
+    } else if (user_data && (sr_get_schema(np2srv.sr_sess.srs, (const char *)user_data, revision, name,
+                                           SR_SCHEMA_YIN, &data) == SR_ERR_OK)) {
         /* include */
         return data;
     }
@@ -226,6 +228,7 @@ server_init(void)
             }
         }
     }
+    ly_ctx_set_module_clb(np2srv.ly_ctx, np2srv_ly_module_clb, NULL);
     sr_free_schemas(schemas, count);
 
     /* 2) add internally used schemas: ietf-netconf with ietf-netconf-acm, */
@@ -418,10 +421,10 @@ process_loop(void *arg)
 
     while (control == LOOP_CONTINUE) {
         /* listen for incomming requests on active NETCONF sessions */
-        if (nc_ps_session_count(np2srv.nc_ps)) {
+        if (nc_ps_session_count(np2srv.nc_ps) > 0) {
             rc = nc_ps_poll(np2srv.nc_ps, 500, &ncs);
         } else {
-            /* if there is no active session, rest for a while */
+            /* if there is no active session or timeout, rest for a while */
             usleep(100);
             continue;
         }
@@ -577,7 +580,20 @@ restart:
                 continue;
             }
             ncm_session_add(ncs);
-            nc_ps_add_session(np2srv.nc_ps, ncs);
+
+            c = 0;
+            while ((c < 3) && nc_ps_add_session(np2srv.nc_ps, ncs)) {
+                /* presumably timeout, give it a shot 2 times */
+                usleep(10000);
+                ++c;
+            }
+
+            if (c == 3) {
+                /* there is some serious problem in synchronization/system planner */
+                EINT;
+                ncm_session_del(ncs, 1);
+                nc_session_free(ncs, free_ds);
+            }
         }
     }
 

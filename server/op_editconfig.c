@@ -126,13 +126,15 @@ op_editconfig(struct lyd_node *rpc, struct nc_session *ncs)
     enum NP2_EDIT_ERROPT erropt = NP2_EDIT_ERROPT_STOP;
     struct lyxml_elem *config_xml;
     struct lyd_node *config = NULL, *next, *iter;
-    char *str, path[1024], *rel;
+    char *str, path[1024], *rel, *valbuf;
     const char *cstr;
     enum NP2_EDIT_OP *op = NULL, *op_new;
     int op_index, op_size, path_index = 0, missing_keys = 0, lastkey = 0;
     int ret;
     struct lys_node_container *cont;
     struct lyd_node_anyxml *axml;
+    const sr_error_info_t *err_info;
+    size_t err_count, i;
 
     /* init */
     path[path_index] = '\0';
@@ -229,8 +231,9 @@ op_editconfig(struct lyd_node *rpc, struct nc_session *ncs)
     }
 
     lyd_print_mem(&str, config, LYD_XML, LYP_WITHSIBLINGS | LYP_FORMAT);
-    VRB("EDIT-CONFIG: ds %d, defop %d, testopt %d, config:\n%s", sessions->srs, defop, testopt, str);
+    DBG("EDIT_CONFIG: ds %d, defop %d, testopt %d, config:\n%s", sessions->srs, defop, testopt, str);
     free(str);
+    str = NULL;
 
     if (sessions->ds != SR_DS_CANDIDATE) {
         /* update data from sysrepo */
@@ -242,7 +245,7 @@ op_editconfig(struct lyd_node *rpc, struct nc_session *ncs)
     /*
      * data manipulation
      */
-
+    valbuf = NULL;
     op_size = 16;
     op = malloc(op_size * sizeof *op);
     op[0] = NP2_EDIT_NONE;
@@ -288,11 +291,7 @@ op_editconfig(struct lyd_node *rpc, struct nc_session *ncs)
                 goto dfs_continue;
             }
 
-            VRB("EDIT_CONFIG: presence container %s, operation %d", path, op[op_index]);
-
-            /* set value for sysrepo */
-            op_set_srval(iter, NULL, 0, &value, &str);
-
+            DBG("EDIT_CONFIG: presence container %s, operation %d", path, op[op_index]);
             break;
         case LYS_LEAF:
             if (missing_keys) {
@@ -305,16 +304,13 @@ op_editconfig(struct lyd_node *rpc, struct nc_session *ncs)
                     /* the last key, create the list instance */
                     lastkey = 1;
 
-                    VRB("EDIT_CONFIG: list %s, operation %d", path, op[op_index]);
+                    DBG("EDIT_CONFIG: list %s, operation %d", path, op[op_index]);
                     break;
                 }
                 goto dfs_continue;
             }
             /* regular leaf */
-            VRB("EDIT_CONFIG: leaf %s, operation %d", path, op[op_index]);
-
-            /* set value for sysrepo */
-            op_set_srval(iter, NULL, 0, &value, &str);
+            DBG("EDIT_CONFIG: leaf %s, operation %d", path, op[op_index]);
 
             break;
         case LYS_LEAFLIST:
@@ -323,13 +319,13 @@ op_editconfig(struct lyd_node *rpc, struct nc_session *ncs)
                 goto internalerror;
             }
 
-            VRB("EDIT_CONFIG: leaflist %s, operation %d", path, op[op_index]);
+            DBG("EDIT_CONFIG: leaflist %s, operation %d", path, op[op_index]);
             if (pos != SR_MOVE_LAST) {
-                VRB("EDIT_CONFIG: moving leaflist %s, position %d (%s)", path, pos, rel ? rel : "absolute");
+                DBG("EDIT_CONFIG: moving leaflist %s, position %d (%s)", path, pos, rel ? rel : "absolute");
             }
 
-            /* set value for sysrepo */
-            op_set_srval(iter, NULL, 0, &value, &str);
+            /* in leaf-list, the value is also the key, so add it into the path */
+            path_index += sprintf(&path[path_index], "[.=\'%s\']", ((struct lyd_node_leaf_list *)iter)->value_str);
 
             break;
         case LYS_LIST:
@@ -338,20 +334,25 @@ op_editconfig(struct lyd_node *rpc, struct nc_session *ncs)
                 goto internalerror;
             }
 
-            /* set value for sysrepo, it will be used as soon as all the keys are processed */
-            op_set_srval(iter, NULL, 0, &value, &str);
+            if (op[op_index] < NP2_EDIT_DELETE) {
+                /* set value for sysrepo, it will be used as soon as all the keys are processed */
+                op_set_srval(iter, NULL, 0, &value, &valbuf);
+            }
 
             /* the creation must be finished later when we get know keys */
             missing_keys = ((struct lys_node_list *)iter->schema)->keys_size;
             goto dfs_continue;
         case LYS_ANYXML:
-            /* set value for sysrepo */
-            op_set_srval(iter, NULL, 0, &value, &str);
-
+            /* nothing special needed, not even supported by sysrepo */
             break;
         default:
             ERR("%s: Invalid node to process", __func__);
             goto internalerror;
+        }
+
+        if (op[op_index] < NP2_EDIT_DELETE && !lastkey) {
+            /* set value for sysrepo */
+            op_set_srval(iter, NULL, 0, &value, &valbuf);
         }
 
         /* apply change to sysrepo */
@@ -377,16 +378,16 @@ op_editconfig(struct lyd_node *rpc, struct nc_session *ncs)
             /* do nothing */
             break;
         }
-        if (str) {
-            free(str);
-            str = NULL;
+        if (valbuf) {
+            free(valbuf);
+            valbuf = NULL;
         }
 
 resultcheck:
         /* check the result */
         switch (ret) {
         case SR_ERR_OK:
-            VRB("EDIT_CONFIG: success (%s)", path);
+            DBG("EDIT_CONFIG: success (%s).", path);
             /* no break */
         case -1:
             /* do nothing */
@@ -410,7 +411,7 @@ resultcheck:
         if (e) {
             switch (erropt) {
             case NP2_EDIT_ERROPT_CONT:
-                VRB("EDIT-CONFIG: continue-on-error (%s).", nc_err_get_msg(e));
+                DBG("EDIT_CONFIG: continue-on-error (%s).", nc_err_get_msg(e));
                 if (ereply) {
                     nc_server_reply_add_err(ereply, e);
                 } else {
@@ -419,11 +420,11 @@ resultcheck:
                 e = NULL;
                 goto dfs_nextsibling;
             case NP2_EDIT_ERROPT_ROLLBACK:
-                VRB("EDIT-CONFIG: rollback-on-error (%s).", nc_err_get_msg(e));
+                DBG("EDIT_CONFIG: rollback-on-error (%s).", nc_err_get_msg(e));
                 sr_discard_changes(sessions->srs);
                 goto cleanup;
             case NP2_EDIT_ERROPT_STOP:
-                VRB("EDIT-CONFIG: stop-on-error (%s).", nc_err_get_msg(e));
+                DBG("EDIT_CONFIG: stop-on-error (%s).", nc_err_get_msg(e));
                 if (sessions->ds != SR_DS_CANDIDATE) {
                     sr_commit(sessions->srs);
                 } else {
@@ -517,19 +518,50 @@ cleanup:
         /* send error reply */
         goto errorreply;
     } else {
-        /* commit the result */
-        if (sessions->ds != SR_DS_CANDIDATE) {
-            /* commit in candidate causes copy to running */
-            if (sr_commit(sessions->srs) != SR_ERR_OK) {
-                goto internalerror;
+        switch (testopt) {
+        case NP2_EDIT_TESTOPT_SET:
+            VRB("edit-config test-option \"set\" not supported, validation will be performed.");
+            /* fallthrough */
+        case NP2_EDIT_TESTOPT_TESTANDSET:
+            if (sessions->ds != SR_DS_CANDIDATE) {
+                /* commit in candidate causes copy to running */
+                ret =  sr_commit(sessions->srs);
+                switch (ret) {
+                case SR_ERR_OK:
+                    break;
+                case SR_ERR_VALIDATION_FAILED:
+                    sr_get_last_errors(sessions->srs, &err_info, &err_count);
+                    for (i = 0; i < err_count; ++i) {
+                        e = nc_err(NC_ERR_OP_FAILED, NC_ERR_TYPE_PROT);
+                        nc_err_set_msg(e, err_info[i].message, "en");
+                        nc_err_set_path(e, err_info[i].xpath);
+
+                        if (ereply) {
+                            nc_server_reply_add_err(ereply, e);
+                        } else {
+                            ereply = nc_server_reply_err(e);
+                        }
+                        e = NULL;
+                    }
+                    goto internalerror;
+                default:
+                    goto internalerror;
+                }
+            } else {
+                /* mark candidate as modified */
+                sessions->flags |= NP2S_CAND_CHANGED;
             }
-        } else {
-            /* mark candidate as modified */
-            sessions->flags |= NP2S_CAND_CHANGED;
+            break;
+        case NP2_EDIT_TESTOPT_TEST:
+            sr_discard_changes(sessions->srs);
+            break;
+        default:
+            EINT;
+            goto internalerror;
         }
 
         /* build positive RPC Reply */
-        VRB("EDIT-CONFIG: done.");
+        DBG("EDIT_CONFIG: done.");
         return nc_server_reply_ok();
     }
 
@@ -539,7 +571,7 @@ internalerror:
 
     /* fatal error, so continue-on-error does not apply here,
      * instead we rollback */
-    VRB("EDIT-CONFIG: fatal error, rolling back.");
+    DBG("EDIT_CONFIG: fatal error, rolling back.");
     sr_discard_changes(sessions->srs);
 
     free(op);
@@ -547,7 +579,6 @@ internalerror:
 
 errorreply:
     if (ereply) {
-        nc_server_reply_add_err(ereply, e);
         return ereply;
     } else {
         return nc_server_reply_err(e);
