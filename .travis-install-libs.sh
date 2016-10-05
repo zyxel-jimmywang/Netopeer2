@@ -19,7 +19,7 @@ else
     cd ../..
 fi
 
-git clone https://github.com/CESNET/libyang.git
+git clone -b devel https://github.com/CESNET/libyang.git
 cd libyang; mkdir build; cd build
 cmake -DCMAKE_INSTALL_PREFIX:PATH=/usr -DCMAKE_BUILD_TYPE=Release ..
 make -j2 && sudo make install
@@ -39,7 +39,7 @@ else
     cd ../..
 fi
 
-git clone https://github.com/CESNET/libnetconf2.git
+git clone -b devel https://github.com/CESNET/libnetconf2.git
 cd libnetconf2; mkdir build; cd build
 cmake -DCMAKE_INSTALL_PREFIX:PATH=/usr -DCMAKE_BUILD_TYPE=Release ..
 make -j2 && sudo make install
