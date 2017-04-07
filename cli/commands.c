@@ -224,7 +224,7 @@ cli_send_recv(struct nc_rpc *rpc, FILE *output)
     }
 
 recv_reply:
-    msgtype = nc_recv_reply(session, rpc, msgid, 1000,
+    msgtype = nc_recv_reply(session, rpc, msgid, 10000,
                             LYD_OPT_DESTRUCT | LYD_OPT_NOSIBLINGS, &reply);
     if (msgtype == NC_MSG_ERROR) {
         ERROR(__func__, "Failed to receive a reply.");
@@ -1417,8 +1417,11 @@ cmd_connect_listen_ssh(struct arglist *cmd, int is_connect)
         printf("Waiting %ds for an SSH Call Home connection on port %u...\n", timeout, port);
         ret = nc_accept_callhome(timeout * 1000, NULL, &session);
         nc_client_ssh_ch_del_bind(host, port);
-        if (ret) {
+        if (ret == -1) {
             ERROR(func_name, "Receiving SSH Call Home on port %d as user \"%s\" failed.", port, user);
+            return EXIT_FAILURE;
+        } else if (ret == 0) {
+            ERROR(func_name, "Receiving SSH Call Home on port %d as user \"%s\" timeouted.", port, user);
             return EXIT_FAILURE;
         }
     }
@@ -2710,7 +2713,7 @@ cmd_copyconfig(const char *arg, char **tmp_config_file)
 {
     int c, config_fd, ret = EXIT_FAILURE;
     struct stat config_stat;
-    char *src = NULL, *config_m = NULL, *src_start;
+    char *src = NULL, *config_m = NULL, *src_start = NULL;
     const char *trg = NULL;
     NC_DATASTORE target = NC_DATASTORE_ERROR, source = NC_DATASTORE_ERROR;
     struct nc_rpc *rpc;
@@ -2869,11 +2872,13 @@ cmd_copyconfig(const char *arg, char **tmp_config_file)
         }
     }
 
-    /* trim top-level element if needed */
-    src_start = trim_top_elem(src, "config", "urn:ietf:params:xml:ns:netconf:base:1.0");
-    if (!src_start) {
-        ERROR(__func__, "Provided configuration content is invalid.");
-        goto fail;
+    if (src) {
+        /* trim top-level element if needed */
+        src_start = trim_top_elem(src, "config", "urn:ietf:params:xml:ns:netconf:base:1.0");
+        if (!src_start) {
+            ERROR(__func__, "Provided configuration content is invalid.");
+            goto fail;
+        }
     }
 
     /* create requests */

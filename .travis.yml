@@ -35,10 +35,21 @@ addons:
     branch_pattern: coverity
 
 before_install:
+<<<<<<< HEAD
   - echo -n | openssl s_client -connect scan.coverity.com:443 | sed -ne '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' | sudo tee -a /etc/ssl/certs/ca-certificates.crt
   - bash .travis-install-libs.sh
 
 script:
   # do nothing, everything here is done in coverity addon
   - true
+=======
+  - if [ "$TRAVIS_OS_NAME" == "linux" ]; then bash .travis-install-libs.sh; fi
+  - if [ "$TRAVIS_OS_NAME" = "linux" -a "$CC" = "gcc" ]; then pip install --user codecov; export CFLAGS="-coverage"; fi
+
+script:
+  - mkdir build-server && cd build-server && cmake ../server && make -j2 && ctest -V
+
+after_success:
+  - if [ "$TRAVIS_OS_NAME" = "linux" -a "$CC" = "gcc" ]; then codecov; fi
+>>>>>>> devel-server
 
