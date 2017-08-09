@@ -41,7 +41,8 @@
 volatile int initialized;
 int pipes[2][2], p_in, p_out;
 
-sr_event_notif_tree_cb notif_tree_clb;
+sr_event_notif_cb notif_clb;
+void *notif_clb_data;
 
 /*
  * SYSREPO WRAPPER FUNCTIONS
@@ -75,79 +76,42 @@ __wrap_sr_list_schemas(sr_session_ctx_t *session, sr_schema_t **schemas, size_t 
     *schemas = calloc(6, sizeof **schemas);
 
     (*schemas)[0].module_name = strdup("ietf-netconf-server");
+    (*schemas)[0].installed = 1;
 
     (*schemas)[1].module_name = strdup("ietf-netconf");
     (*schemas)[1].ns = strdup("urn:ietf:params:xml:ns:netconf:base:1.0");
     (*schemas)[1].prefix = strdup("nc");
     (*schemas)[1].revision.revision = strdup("2011-06-01");
     (*schemas)[1].revision.file_path_yin = strdup(TESTS_DIR"/files/ietf-netconf.yin");
+    (*schemas)[1].installed = 1;
 
     (*schemas)[2].module_name = strdup("ietf-netconf-notifications");
     (*schemas)[2].ns = strdup("urn:ietf:params:xml:ns:yang:ietf-netconf-notifications");
     (*schemas)[2].prefix = strdup("ncn");
     (*schemas)[2].revision.revision = strdup("2012-02-06");
     (*schemas)[2].revision.file_path_yin = strdup(TESTS_DIR"/files/ietf-netconf-notifications.yin");
+    (*schemas)[2].installed = 1;
 
     (*schemas)[3].module_name = strdup("notifications");
     (*schemas)[3].ns = strdup("urn:ietf:params:xml:ns:netconf:notification:1.0");
     (*schemas)[3].prefix = strdup("ncEvent");
     (*schemas)[3].revision.revision = strdup("2008-07-14");
     (*schemas)[3].revision.file_path_yin = strdup(TESTS_DIR"/files/notifications.yin");
+    (*schemas)[3].installed = 1;
 
     (*schemas)[4].module_name = strdup("nc-notifications");
     (*schemas)[4].ns = strdup("urn:ietf:params:xml:ns:netmod:notification");
     (*schemas)[4].prefix = strdup("manageEvent");
     (*schemas)[4].revision.revision = strdup("2008-07-14");
     (*schemas)[4].revision.file_path_yin = strdup(TESTS_DIR"/files/nc-notifications.yin");
+    (*schemas)[4].installed = 1;
 
     (*schemas)[5].module_name = strdup("test-notif");
     (*schemas)[5].ns = strdup("urn:libyang:test:notif");
     (*schemas)[5].prefix = strdup("tn");
     (*schemas)[5].revision.revision = strdup("2017-03-22");
     (*schemas)[5].revision.file_path_yin = strdup(TESTS_DIR"/files/test-notif.yin");
-
-    return SR_ERR_OK;
-}
-
-int
-__wrap_sr_get_schema(sr_session_ctx_t *session, const char *module_name, const char *revision,
-                     const char *submodule_name, sr_schema_format_t format, char **schema_content)
-{
-    int fd;
-    struct stat st;
-    (void)session;
-    (void)revision;
-    (void)submodule_name;
-
-    if (format != SR_SCHEMA_YIN) {
-        fail();
-    }
-
-    if (!strcmp(module_name, "ietf-netconf-server")) {
-        *schema_content = strdup("<module name=\"ietf-netconf-server\" xmlns=\"urn:ietf:params:xml:ns:yang:yin:1\"><namespace uri=\"ns\"/><prefix value=\"pr\"/></module>");
-        return SR_ERR_OK;
-    }
-    if (!strcmp(module_name, "ietf-netconf")) {
-        fd = open(TESTS_DIR "/files/ietf-netconf.yin", O_RDONLY);
-    } else if (!strcmp(module_name, "ietf-netconf-notifications")) {
-        fd = open(TESTS_DIR "/files/ietf-netconf-notifications.yin", O_RDONLY);
-    } else if (!strcmp(module_name, "notifications")) {
-        fd = open(TESTS_DIR "/files/notifications.yin", O_RDONLY);
-    } else if (!strcmp(module_name, "nc-notifications")) {
-        fd = open(TESTS_DIR "/files/nc-notifications.yin", O_RDONLY);
-    } else if (!strcmp(module_name, "test-notif")) {
-        fd = open(TESTS_DIR "/files/test-notif.yin", O_RDONLY);
-    } else {
-        return SR_ERR_NOT_FOUND;
-    }
-    assert_int_not_equal(fd, -1);
-
-    assert_int_equal(fstat(fd, &st), 0);
-
-    *schema_content = malloc((st.st_size + 1) * sizeof(char));
-    assert_int_equal(read(fd, *schema_content, st.st_size), st.st_size);
-    close(fd);
-    (*schema_content)[st.st_size] = '\0';
+    (*schemas)[5].installed = 1;
 
     return SR_ERR_OK;
 }
@@ -246,16 +210,16 @@ __wrap_sr_event_notif_send(sr_session_ctx_t *session, const char *xpath, const s
 }
 
 int
-__wrap_sr_event_notif_subscribe_tree(sr_session_ctx_t *session, const char *xpath, sr_event_notif_tree_cb callback,
-                                     void *private_ctx, sr_subscr_options_t opts, sr_subscription_ctx_t **subscription)
+__wrap_sr_event_notif_subscribe(sr_session_ctx_t *session, const char *xpath, sr_event_notif_cb callback,
+                                void *private_ctx, sr_subscr_options_t opts, sr_subscription_ctx_t **subscription)
 {
     (void)session;
-    (void)private_ctx;
     (void)opts;
     (void)subscription;
 
     printf("test: New subscription to %s\n", xpath);
-    notif_tree_clb = callback;
+    notif_clb = callback;
+    notif_clb_data = private_ctx;
     return SR_ERR_OK;
 }
 
@@ -270,69 +234,18 @@ __wrap_sr_event_notif_replay(sr_session_ctx_t *session, sr_subscription_ctx_t *s
     return SR_ERR_OK;
 }
 
+int
+__wrap_sr_check_exec_permission(sr_session_ctx_t *session, const char *xpath, bool *permitted)
+{
+    (void)session;
+    (void)xpath;
+    *permitted = true;
+    return SR_ERR_OK;
+}
+
 /*
  * LIBNETCONF2 WRAPPER FUNCTIONS
  */
-struct nc_session {
-    NC_STATUS status;
-    NC_SESSION_TERM_REASON term_reason;
-    int side;
-
-    uint32_t id;
-    int version;
-
-    NC_TRANSPORT_IMPL ti_type;
-    pthread_mutex_t *ti_lock;
-    pthread_cond_t *ti_cond;
-    volatile int *ti_inuse;
-    union {
-        struct {
-            int in;
-            int out;
-        } fd;
-#ifdef NC_ENABLED_SSH
-        struct {
-            void *channel;
-            void *session;
-            struct nc_session *next;
-        } libssh;
-#endif
-#ifdef NC_ENABLED_TLS
-        void *tls;
-#endif
-    } ti;
-    const char *username;
-    const char *host;
-    uint16_t port;
-
-    struct ly_ctx *ctx;
-    void *data;
-    uint8_t flags;
-
-    union {
-        struct {
-            uint64_t msgid;
-            const char **cpblts;
-            struct nc_msg_cont *replies;
-            struct nc_msg_cont *notifs;
-            volatile pthread_t *ntf_tid;
-        } client;
-        struct {
-            time_t session_start;
-            time_t last_rpc;
-            int ntf_status;
-            pthread_mutex_t *ch_lock;
-            pthread_cond_t *ch_cond;
-#ifdef NC_ENABLED_SSH
-            uint16_t ssh_auth_attempts;
-#endif
-#ifdef NC_ENABLED_TLS
-            void *client_cert;
-#endif
-        } server;
-    } opts;
-};
-
 NC_MSG_TYPE
 __wrap_nc_accept(int timeout, struct nc_session **session)
 {
@@ -535,8 +448,8 @@ static void
 test_basic(void **state)
 {
     (void)state; /* unused */
-    sr_node_t *trees;
-    size_t tree_cnt;
+    sr_val_t *vals;
+    size_t val_cnt;
     const char *subsc_rpc =
     "<rpc msgid=\"1\" xmlns=\"urn:ietf:params:xml:ns:netconf:base:1.0\">"
         "<create-subscription xmlns=\"urn:ietf:params:xml:ns:netconf:notification:1.0\">"
@@ -566,101 +479,26 @@ test_basic(void **state)
     test_read(p_in, subsc_rpl, __LINE__);
 
     /* send notif */
-    tree_cnt = 3;
-    trees = calloc(tree_cnt, sizeof *trees);
+    val_cnt = 3;
+    vals = calloc(val_cnt, sizeof *vals);
 
-    trees[0].name = strdup("username");
-    trees[0].type = SR_STRING_T;
-    trees[0].data.string_val = strdup("test");
-    trees[0].module_name = strdup("ietf-netconf-notifications");
+    vals[0].xpath = strdup("/ietf-netconf-notifications:netconf-session-start/username");
+    vals[0].type = SR_STRING_T;
+    vals[0].data.string_val = strdup("test");
 
-    trees[1].name = strdup("session-id");
-    trees[1].type = SR_UINT32_T;
-    trees[1].data.uint32_val = 1;
-    trees[1].module_name = strdup("ietf-netconf-notifications");
+    vals[1].xpath = strdup("/ietf-netconf-notifications:netconf-session-start/session-id");
+    vals[1].type = SR_UINT32_T;
+    vals[1].data.uint32_val = 1;
 
-    trees[2].name = strdup("source-host");
-    trees[2].type = SR_STRING_T;
-    trees[2].data.string_val = strdup("127.0.0.1");
-    trees[2].module_name = strdup("ietf-netconf-notifications");
+    vals[2].xpath = strdup("/ietf-netconf-notifications:netconf-session-start/source-host");
+    vals[2].type = SR_STRING_T;
+    vals[2].data.string_val = strdup("127.0.0.1");
 
-    notif_tree_clb(SR_EV_NOTIF_T_REALTIME, "/ietf-netconf-notifications:netconf-session-start", trees, tree_cnt, time(NULL), NULL);
+    notif_clb(SR_EV_NOTIF_T_REALTIME, "/ietf-netconf-notifications:netconf-session-start", vals, val_cnt, time(NULL), notif_clb_data);
 
-    sr_free_trees(trees, tree_cnt);
+    sr_free_values(vals, val_cnt);
 
     /* read notif */
-    test_read(p_in, notif_data, __LINE__);
-}
-
-static void
-test_stream(void **state)
-{
-    (void)state; /* unused */
-    sr_node_t *trees;
-    size_t tree_cnt;
-    const char *subsc_rpc =
-    "<rpc msgid=\"1\" xmlns=\"urn:ietf:params:xml:ns:netconf:base:1.0\">"
-        "<create-subscription xmlns=\"urn:ietf:params:xml:ns:netconf:notification:1.0\">"
-            "<stream>test-notif</stream>"
-        "</create-subscription>"
-    "</rpc>";
-    const char *subsc_rpl =
-    "<rpc-reply msgid=\"1\" xmlns=\"urn:ietf:params:xml:ns:netconf:base:1.0\">"
-        "<ok/>"
-    "</rpc-reply>";
-    const char *notif_data =
-    "<notification xmlns=\"urn:ietf:params:xml:ns:netconf:notification:1.0\">"
-        "<eventTime>0000-00-00T00:00:00Z</eventTime>"
-        "<test-notif1 xmlns=\"urn:libyang:test:notif\">"
-          "<l1>value</l1>"
-        "</test-notif1>"
-    "</notification>";
-
-    initialized = 0;
-    while (!initialized) {
-        usleep(100000);
-    }
-
-    test_write(p_out, subsc_rpc, __LINE__);
-    test_read(p_in, subsc_rpl, __LINE__);
-
-    /* send wrong notif */
-    tree_cnt = 3;
-    trees = calloc(tree_cnt, sizeof *trees);
-
-    trees[0].name = strdup("username");
-    trees[0].type = SR_STRING_T;
-    trees[0].data.string_val = strdup("test");
-    trees[0].module_name = strdup("ietf-netconf-notifications");
-
-    trees[1].name = strdup("session-id");
-    trees[1].type = SR_UINT32_T;
-    trees[1].data.uint32_val = 1;
-    trees[1].module_name = strdup("ietf-netconf-notifications");
-
-    trees[2].name = strdup("source-host");
-    trees[2].type = SR_STRING_T;
-    trees[2].data.string_val = strdup("127.0.0.1");
-    trees[2].module_name = strdup("ietf-netconf-notifications");
-
-    notif_tree_clb(SR_EV_NOTIF_T_REALTIME, "/ietf-netconf-notifications:netconf-session-start", trees, tree_cnt, time(NULL), NULL);
-
-    sr_free_trees(trees, tree_cnt);
-
-    /* send right notif */
-    tree_cnt = 1;
-    trees = calloc(tree_cnt, sizeof *trees);
-
-    trees[0].name = strdup("l1");
-    trees[0].type = SR_STRING_T;
-    trees[0].data.string_val = strdup("value");
-    trees[0].module_name = strdup("test-notif");
-
-    notif_tree_clb(SR_EV_NOTIF_T_REALTIME, "/test-notif:test-notif1", trees, tree_cnt, time(NULL), NULL);
-
-    sr_free_trees(trees, tree_cnt);
-
-    /* read right notif */
     test_read(p_in, notif_data, __LINE__);
 }
 
@@ -668,8 +506,8 @@ static void
 test_filter_xpath(void **state)
 {
     (void)state; /* unused */
-    sr_node_t *trees;
-    size_t tree_cnt;
+    sr_val_t *vals;
+    size_t val_cnt;
     const char *subsc_rpc =
     "<rpc msgid=\"1\" xmlns=\"urn:ietf:params:xml:ns:netconf:base:1.0\">"
         "<create-subscription xmlns=\"urn:ietf:params:xml:ns:netconf:notification:1.0\">"
@@ -698,40 +536,36 @@ test_filter_xpath(void **state)
     test_read(p_in, subsc_rpl, __LINE__);
 
     /* send notif 1 */
-    tree_cnt = 3;
-    trees = calloc(tree_cnt, sizeof *trees);
+    val_cnt = 3;
+    vals = calloc(val_cnt, sizeof *vals);
 
-    trees[0].name = strdup("username");
-    trees[0].type = SR_STRING_T;
-    trees[0].data.string_val = strdup("test");
-    trees[0].module_name = strdup("ietf-netconf-notifications");
+    vals[0].xpath = strdup("/ietf-netconf-notifications:netconf-session-start/username");
+    vals[0].type = SR_STRING_T;
+    vals[0].data.string_val = strdup("test");
 
-    trees[1].name = strdup("session-id");
-    trees[1].type = SR_UINT32_T;
-    trees[1].data.uint32_val = 1;
-    trees[1].module_name = strdup("ietf-netconf-notifications");
+    vals[1].xpath = strdup("/ietf-netconf-notifications:netconf-session-start/session-id");
+    vals[1].type = SR_UINT32_T;
+    vals[1].data.uint32_val = 1;
 
-    trees[2].name = strdup("source-host");
-    trees[2].type = SR_STRING_T;
-    trees[2].data.string_val = strdup("127.0.0.1");
-    trees[2].module_name = strdup("ietf-netconf-notifications");
+    vals[2].xpath = strdup("/ietf-netconf-notifications:netconf-session-start/source-host");
+    vals[2].type = SR_STRING_T;
+    vals[2].data.string_val = strdup("127.0.0.1");
 
-    notif_tree_clb(SR_EV_NOTIF_T_REALTIME, "/ietf-netconf-notifications:netconf-session-start", trees, tree_cnt, time(NULL), NULL);
+    notif_clb(SR_EV_NOTIF_T_REALTIME, "/ietf-netconf-notifications:netconf-session-start", vals, val_cnt, time(NULL), notif_clb_data);
 
-    sr_free_trees(trees, tree_cnt);
+    sr_free_values(vals, val_cnt);
 
     /* send notif 2 */
-    tree_cnt = 1;
-    trees = calloc(tree_cnt, sizeof *trees);
+    val_cnt = 1;
+    vals = calloc(val_cnt, sizeof *vals);
 
-    trees[0].name = strdup("l1");
-    trees[0].type = SR_STRING_T;
-    trees[0].data.string_val = strdup("value");
-    trees[0].module_name = strdup("test-notif");
+    vals[0].xpath = strdup("/test-notif:test-notif1/l1");
+    vals[0].type = SR_STRING_T;
+    vals[0].data.string_val = strdup("value");
 
-    notif_tree_clb(SR_EV_NOTIF_T_REALTIME, "/test-notif:test-notif1", trees, tree_cnt, time(NULL), NULL);
+    notif_clb(SR_EV_NOTIF_T_REALTIME, "/test-notif:test-notif1", vals, val_cnt, time(NULL), notif_clb_data);
 
-    sr_free_trees(trees, tree_cnt);
+    sr_free_values(vals, val_cnt);
 
     /* read filtered notif */
     test_read(p_in, notif_data, __LINE__);
@@ -741,8 +575,8 @@ static void
 test_filter_subtree(void **state)
 {
     (void)state; /* unused */
-    sr_node_t *trees;
-    size_t tree_cnt;
+    sr_val_t *vals;
+    size_t val_cnt;
     const char *subsc_rpc =
     "<rpc msgid=\"1\" xmlns=\"urn:ietf:params:xml:ns:netconf:base:1.0\">"
         "<create-subscription xmlns=\"urn:ietf:params:xml:ns:netconf:notification:1.0\">"
@@ -775,40 +609,36 @@ test_filter_subtree(void **state)
     test_read(p_in, subsc_rpl, __LINE__);
 
     /* send notif 1 */
-    tree_cnt = 3;
-    trees = calloc(tree_cnt, sizeof *trees);
+    val_cnt = 3;
+    vals = calloc(val_cnt, sizeof *vals);
 
-    trees[0].name = strdup("username");
-    trees[0].type = SR_STRING_T;
-    trees[0].data.string_val = strdup("test");
-    trees[0].module_name = strdup("ietf-netconf-notifications");
+    vals[0].xpath = strdup("/ietf-netconf-notifications:netconf-session-start/username");
+    vals[0].type = SR_STRING_T;
+    vals[0].data.string_val = strdup("test");
 
-    trees[1].name = strdup("session-id");
-    trees[1].type = SR_UINT32_T;
-    trees[1].data.uint32_val = 1;
-    trees[1].module_name = strdup("ietf-netconf-notifications");
+    vals[1].xpath = strdup("/ietf-netconf-notifications:netconf-session-start/session-id");
+    vals[1].type = SR_UINT32_T;
+    vals[1].data.uint32_val = 1;
 
-    trees[2].name = strdup("source-host");
-    trees[2].type = SR_STRING_T;
-    trees[2].data.string_val = strdup("127.0.0.1");
-    trees[2].module_name = strdup("ietf-netconf-notifications");
+    vals[2].xpath = strdup("/ietf-netconf-notifications:netconf-session-start/source-host");
+    vals[2].type = SR_STRING_T;
+    vals[2].data.string_val = strdup("127.0.0.1");
 
-    notif_tree_clb(SR_EV_NOTIF_T_REALTIME, "/ietf-netconf-notifications:netconf-session-start", trees, tree_cnt, time(NULL), NULL);
+    notif_clb(SR_EV_NOTIF_T_REALTIME, "/ietf-netconf-notifications:netconf-session-start", vals, val_cnt, time(NULL), notif_clb_data);
 
-    sr_free_trees(trees, tree_cnt);
+    sr_free_values(vals, val_cnt);
 
     /* send notif 2 */
-    tree_cnt = 1;
-    trees = calloc(tree_cnt, sizeof *trees);
+    val_cnt = 1;
+    vals = calloc(val_cnt, sizeof *vals);
 
-    trees[0].name = strdup("l1");
-    trees[0].type = SR_STRING_T;
-    trees[0].data.string_val = strdup("value");
-    trees[0].module_name = strdup("test-notif");
+    vals[0].xpath = strdup("/test-notif:test-notif1/l1");
+    vals[0].type = SR_STRING_T;
+    vals[0].data.string_val = strdup("value");
 
-    notif_tree_clb(SR_EV_NOTIF_T_REALTIME, "/test-notif:test-notif1", trees, tree_cnt, time(NULL), NULL);
+    notif_clb(SR_EV_NOTIF_T_REALTIME, "/test-notif:test-notif1", vals, val_cnt, time(NULL), notif_clb_data);
 
-    sr_free_trees(trees, tree_cnt);
+    sr_free_values(vals, val_cnt);
 
     /* read filtered notif */
     test_read(p_in, notif_data, __LINE__);
@@ -818,9 +648,9 @@ static void
 test_replay(void **state)
 {
     (void)state; /* unused */
-    sr_node_t *trees;
+    sr_val_t *vals;
     time_t cur_time;
-    size_t tree_cnt;
+    size_t val_cnt;
     char *subsc_rpc, *start, *end;
     const char *subsc_rpl =
     "<rpc-reply msgid=\"1\" xmlns=\"urn:ietf:params:xml:ns:netconf:base:1.0\">"
@@ -880,48 +710,42 @@ test_replay(void **state)
     test_read(p_in, subsc_rpl, __LINE__);
 
     /* send notif 1 */
-    tree_cnt = 3;
-    trees = calloc(tree_cnt, sizeof *trees);
+    val_cnt = 3;
+    vals = calloc(val_cnt, sizeof *vals);
 
-    trees[0].name = strdup("username");
-    trees[0].type = SR_STRING_T;
-    trees[0].data.string_val = strdup("test");
-    trees[0].module_name = strdup("ietf-netconf-notifications");
+    vals[0].xpath = strdup("/ietf-netconf-notifications:netconf-session-start/username");
+    vals[0].type = SR_STRING_T;
+    vals[0].data.string_val = strdup("test");
 
-    trees[1].name = strdup("session-id");
-    trees[1].type = SR_UINT32_T;
-    trees[1].data.uint32_val = 1;
-    trees[1].module_name = strdup("ietf-netconf-notifications");
+    vals[1].xpath = strdup("/ietf-netconf-notifications:netconf-session-start/session-id");
+    vals[1].type = SR_UINT32_T;
+    vals[1].data.uint32_val = 1;
 
-    trees[2].name = strdup("source-host");
-    trees[2].type = SR_STRING_T;
-    trees[2].data.string_val = strdup("127.0.0.1");
-    trees[2].module_name = strdup("ietf-netconf-notifications");
+    vals[2].xpath = strdup("/ietf-netconf-notifications:netconf-session-start/source-host");
+    vals[2].type = SR_STRING_T;
+    vals[2].data.string_val = strdup("127.0.0.1");
 
-    notif_tree_clb(SR_EV_NOTIF_T_REPLAY, "/ietf-netconf-notifications:netconf-session-start", trees, tree_cnt, cur_time - 1, NULL);
-    sr_free_trees(trees, tree_cnt);
+    notif_clb(SR_EV_NOTIF_T_REPLAY, "/ietf-netconf-notifications:netconf-session-start", vals, val_cnt, cur_time - 1, notif_clb_data);
+    sr_free_values(vals, val_cnt);
 
     /* send notif 2 */
-    tree_cnt = 1;
-    trees = calloc(tree_cnt, sizeof *trees);
+    val_cnt = 1;
+    vals = calloc(val_cnt, sizeof *vals);
 
-    trees[0].name = strdup("l1");
-    trees[0].type = SR_STRING_T;
-    trees[0].data.string_val = strdup("value");
-    trees[0].module_name = strdup("test-notif");
+    vals[0].xpath = strdup("/test-notif:test-notif1/l1");
+    vals[0].type = SR_STRING_T;
+    vals[0].data.string_val = strdup("value");
 
-    notif_tree_clb(SR_EV_NOTIF_T_REALTIME, "/test-notif:test-notif1", trees, tree_cnt, cur_time - 3, NULL);
-    sr_free_trees(trees, tree_cnt);
+    notif_clb(SR_EV_NOTIF_T_REALTIME, "/test-notif:test-notif1", vals, val_cnt, cur_time - 3, notif_clb_data);
+    sr_free_values(vals, val_cnt);
 
-    /* send 3 replay complete */
-    notif_tree_clb(SR_EV_NOTIF_T_REPLAY_COMPLETE, "does-not-matter", NULL, 0, cur_time, NULL);
-    notif_tree_clb(SR_EV_NOTIF_T_REPLAY_COMPLETE, "does-not-matter", NULL, 0, cur_time, NULL);
-    notif_tree_clb(SR_EV_NOTIF_T_REPLAY_COMPLETE, "does-not-matter", NULL, 0, cur_time, NULL);
+    /* send 2 replay complete */
+    notif_clb(SR_EV_NOTIF_T_REPLAY_COMPLETE, "does-not-matter", NULL, 0, cur_time, notif_clb_data);
+    notif_clb(SR_EV_NOTIF_T_REPLAY_COMPLETE, "does-not-matter", NULL, 0, cur_time, notif_clb_data);
 
-    /* send 3 notification complete */
-    notif_tree_clb(SR_EV_NOTIF_T_REPLAY_STOP, "does-not-matter", NULL, 0, cur_time + 5, NULL);
-    notif_tree_clb(SR_EV_NOTIF_T_REPLAY_STOP, "does-not-matter", NULL, 0, cur_time + 5, NULL);
-    notif_tree_clb(SR_EV_NOTIF_T_REPLAY_STOP, "does-not-matter", NULL, 0, cur_time + 5, NULL);
+    /* send 2 notification complete */
+    notif_clb(SR_EV_NOTIF_T_REPLAY_STOP, "does-not-matter", NULL, 0, cur_time + 5, notif_clb_data);
+    notif_clb(SR_EV_NOTIF_T_REPLAY_STOP, "does-not-matter", NULL, 0, cur_time + 5, notif_clb_data);
 
     /* read notif 2 */
     test_read(p_in, notif2_data, __LINE__);
@@ -938,7 +762,6 @@ main(void)
 {
     const struct CMUnitTest tests[] = {
                     cmocka_unit_test_setup(test_basic, np_start),
-                    cmocka_unit_test(test_stream),
                     cmocka_unit_test(test_filter_xpath),
                     cmocka_unit_test(test_filter_subtree),
                     cmocka_unit_test_teardown(test_replay, np_stop),

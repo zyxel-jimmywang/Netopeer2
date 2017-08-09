@@ -69,62 +69,10 @@ __wrap_sr_list_schemas(sr_session_ctx_t *session, sr_schema_t **schemas, size_t 
     *schemas = calloc(2, sizeof **schemas);
     *schema_cnt = 2;
     (*schemas)[0].module_name = strdup("ietf-netconf-server");
+    (*schemas)[0].installed = 1;
+
     (*schemas)[1].module_name = strdup("custom-op");
-    return SR_ERR_OK;
-}
-
-int
-__wrap_sr_get_schema(sr_session_ctx_t *session, const char *module_name, const char *revision,
-                     const char *submodule_name, sr_schema_format_t format, char **schema_content)
-{
-    (void)session;
-    (void)revision;
-    (void)submodule_name;
-    (void)format;
-
-    if (!strcmp(module_name, "ietf-netconf-server")) {
-        *schema_content = strdup("<module name=\"ietf-netconf-server\" xmlns=\"urn:ietf:params:xml:ns:yang:yin:1\"><namespace uri=\"ns\"/><prefix value=\"pr\"/></module>");
-    } else if (!strcmp(module_name, "custom-op")) {
-        *schema_content = strdup(
-            "<module name=\"custom-op\" xmlns=\"urn:ietf:params:xml:ns:yang:yin:1\">"
-                "<namespace uri=\"custom-op\"/>"
-                "<prefix value=\"co\"/>"
-                "<yang-version value=\"1.1\"/>"
-                "<rpc name=\"rpc1\">"
-                    "<input>"
-                        "<leaf name=\"l1\">"
-                            "<type name=\"string\"/>"
-                        "</leaf>"
-                    "</input>"
-                    "<output>"
-                        "<leaf name=\"l2\">"
-                            "<type name=\"string\"/>"
-                        "</leaf>"
-                    "</output>"
-                "</rpc>"
-                "<list name=\"li1\">"
-                    "<key value=\"li1-key\"/>"
-                    "<leaf name=\"li1-key\">"
-                        "<type name=\"string\"/>"
-                    "</leaf>"
-                    "<container name=\"cont\">"
-                        "<action name=\"act\">"
-                            "<input>"
-                                "<leaf name=\"l3\">"
-                                    "<type name=\"string\"/>"
-                                "</leaf>"
-                            "</input>"
-                            "<output>"
-                                "<leaf name=\"l4\">"
-                                    "<type name=\"string\"/>"
-                                "</leaf>"
-                            "</output>"
-                        "</action>"
-                    "</container>"
-                "</list>"
-            "</module>"
-        );
-    }
+    (*schemas)[1].installed = 1;
 
     return SR_ERR_OK;
 }
@@ -238,68 +186,30 @@ __wrap_sr_action_send(sr_session_ctx_t *session, const char *xpath, const sr_val
     return SR_ERR_OK;
 }
 
+int
+__wrap_sr_event_notif_send(sr_session_ctx_t *session, const char *xpath, const sr_val_t *values,
+                           const size_t values_cnt, sr_ev_notif_flag_t opts)
+{
+    (void)session;
+    (void)xpath;
+    (void)values;
+    (void)values_cnt;
+    (void)opts;
+    return SR_ERR_OK;
+}
+
+int
+__wrap_sr_check_exec_permission(sr_session_ctx_t *session, const char *xpath, bool *permitted)
+{
+    (void)session;
+    (void)xpath;
+    (void)permitted;
+    return SR_ERR_OK;
+}
+
 /*
  * LIBNETCONF2 WRAPPER FUNCTIONS
  */
-struct nc_session {
-    NC_STATUS status;
-    NC_SESSION_TERM_REASON term_reason;
-    int side;
-
-    uint32_t id;
-    int version;
-
-    NC_TRANSPORT_IMPL ti_type;
-    pthread_mutex_t *ti_lock;
-    pthread_cond_t *ti_cond;
-    volatile int *ti_inuse;
-    union {
-        struct {
-            int in;
-            int out;
-        } fd;
-#ifdef NC_ENABLED_SSH
-        struct {
-            void *channel;
-            void *session;
-            struct nc_session *next;
-        } libssh;
-#endif
-#ifdef NC_ENABLED_TLS
-        void *tls;
-#endif
-    } ti;
-    const char *username;
-    const char *host;
-    uint16_t port;
-
-    struct ly_ctx *ctx;
-    void *data;
-    uint8_t flags;
-
-    union {
-        struct {
-            uint64_t msgid;
-            const char **cpblts;
-            struct nc_msg_cont *replies;
-            struct nc_msg_cont *notifs;
-            volatile pthread_t *ntf_tid;
-        } client;
-        struct {
-            time_t session_start;
-            time_t last_rpc;
-            pthread_mutex_t *ch_lock;
-            pthread_cond_t *ch_cond;
-#ifdef NC_ENABLED_SSH
-            uint16_t ssh_auth_attempts;
-#endif
-#ifdef NC_ENABLED_TLS
-            void *client_cert;
-#endif
-        } server;
-    } opts;
-};
-
 NC_MSG_TYPE
 __wrap_nc_accept(int timeout, struct nc_session **session)
 {

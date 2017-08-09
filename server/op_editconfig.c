@@ -60,8 +60,18 @@ edit_get_op(struct lyd_node *node, enum NP2_EDIT_OP parentop, enum NP2_EDIT_DEFO
     switch (parentop) {
     case NP2_EDIT_REPLACE:
         return NP2_EDIT_REPLACE_INNER;
-    case 0:
-        return (enum NP2_EDIT_OP)defop;
+    case NP2_EDIT_NONE:
+        switch (defop) {
+        case NP2_EDIT_DEFOP_NONE:
+            return NP2_EDIT_NONE;
+        case NP2_EDIT_DEFOP_MERGE:
+            return NP2_EDIT_MERGE;
+        case NP2_EDIT_DEFOP_REPLACE:
+            return NP2_EDIT_REPLACE;
+        default:
+            EINT;
+            return 0;
+        }
     default:
         return parentop;
     }
@@ -99,7 +109,7 @@ edit_get_move(struct lyd_node *node, const char *path, sr_move_position_t *pos, 
                     *pos = SR_MOVE_AFTER;
                 }
             } else if (!strcmp(attr_iter->name, name)) {
-                if (asprintf(rel, format, path, attr_iter->value)) {
+                if (asprintf(rel, format, path, attr_iter->value_str) < 0) {
                     ERR("%s: memory allocation failed (%s) - %s:%d",
                         __func__, strerror(errno), __FILE__, __LINE__);
                     return EXIT_FAILURE;
@@ -176,6 +186,7 @@ op_editconfig(struct lyd_node *rpc, struct nc_session *ncs)
     int op_index, op_size, path_index = 0, missing_keys = 0, lastkey = 0, np_cont;
     int ret, path_len, new_len;
     struct lyd_node_anydata *any;
+    bool permitted;
 
     /* init */
     path_len = 128;
@@ -189,12 +200,20 @@ op_editconfig(struct lyd_node *rpc, struct nc_session *ncs)
     /* get sysrepo connections for this session */
     sessions = (struct np2_sessions *)nc_session_get_data(ncs);
 
+    /* check NACM */
+    ret = sr_check_exec_permission(sessions->srs, "/ietf-netconf:edit-config", &permitted);
+    if (ret != SR_ERR_OK) {
+        return op_build_err_sr(NULL, sessions->srs);
+    } else if (!permitted) {
+        return op_build_err_nacm(NULL);
+    }
+
     /*
      * parse parameters
      */
 
     /* target */
-    nodeset = lyd_find_xpath(rpc, "/ietf-netconf:edit-config/target/*");
+    nodeset = lyd_find_path(rpc, "/ietf-netconf:edit-config/target/*");
     cstr = nodeset->set.d[0]->schema->name;
     ly_set_free(nodeset);
 
@@ -211,7 +230,7 @@ op_editconfig(struct lyd_node *rpc, struct nc_session *ncs)
     }
 
     /* default-operation */
-    nodeset = lyd_find_xpath(rpc, "/ietf-netconf:edit-config/default-operation");
+    nodeset = lyd_find_path(rpc, "/ietf-netconf:edit-config/default-operation");
     if (nodeset->number) {
         cstr = ((struct lyd_node_leaf_list*)nodeset->set.d[0])->value_str;
         if (!strcmp(cstr, "replace")) {
@@ -225,7 +244,7 @@ op_editconfig(struct lyd_node *rpc, struct nc_session *ncs)
     ly_set_free(nodeset);
 
     /* test-option */
-    nodeset = lyd_find_xpath(rpc, "/ietf-netconf:edit-config/test-option");
+    nodeset = lyd_find_path(rpc, "/ietf-netconf:edit-config/test-option");
     if (nodeset->number) {
         cstr = ((struct lyd_node_leaf_list*)nodeset->set.d[0])->value_str;
         if (!strcmp(cstr, "set")) {
@@ -239,7 +258,7 @@ op_editconfig(struct lyd_node *rpc, struct nc_session *ncs)
     ly_set_free(nodeset);
 
     /* error-option */
-    nodeset = lyd_find_xpath(rpc, "/ietf-netconf:edit-config/error-option");
+    nodeset = lyd_find_path(rpc, "/ietf-netconf:edit-config/error-option");
     if (nodeset->number) {
         cstr = ((struct lyd_node_leaf_list*)nodeset->set.d[0])->value_str;
         if (!strcmp(cstr, "rollback-on-error")) {
@@ -254,7 +273,7 @@ op_editconfig(struct lyd_node *rpc, struct nc_session *ncs)
 
 
     /* config */
-    nodeset = lyd_find_xpath(rpc, "/ietf-netconf:edit-config/config");
+    nodeset = lyd_find_path(rpc, "/ietf-netconf:edit-config/config");
     if (nodeset->number) {
         any = (struct lyd_node_anydata *)nodeset->set.d[0];
         switch (any->value_type) {
@@ -650,21 +669,14 @@ cleanup:
         VRB("edit-config test-option \"set\" not supported, validation will be performed.");
         /* fallthrough */
     case NP2_EDIT_TESTOPT_TESTANDSET:
-        if (sessions->ds != SR_DS_CANDIDATE) {
-            /* commit in candidate causes copy to running */
-            if (sr_commit(sessions->srs) != SR_ERR_OK) {
-                ereply = op_build_err_sr(ereply, sessions->srs);
-                sr_discard_changes(sessions->srs); /* rollback the changes */
-            }
-        } else {
-            if (sr_validate(sessions->srs) != SR_ERR_OK) {
-                ereply = op_build_err_sr(ereply, sessions->srs);
-                /* content is not valid, rollback */
-                sr_discard_changes(sessions->srs);
-            } else {
-                /* mark candidate as modified */
-                sessions->flags |= NP2S_CAND_CHANGED;
-            }
+        /* commit changes */
+        if (sr_commit(sessions->srs) != SR_ERR_OK) {
+            ereply = op_build_err_sr(ereply, sessions->srs);
+            sr_discard_changes(sessions->srs); /* rollback the changes */
+        }
+        if (sessions->ds == SR_DS_CANDIDATE) {
+            /* mark candidate as modified */
+            sessions->flags |= NP2S_CAND_CHANGED;
         }
         break;
     case NP2_EDIT_TESTOPT_TEST:

@@ -22,9 +22,9 @@
 #include "operations.h"
 
 char *
-op_get_srval(struct ly_ctx *ctx, sr_val_t *value, char *buf)
+op_get_srval(struct ly_ctx *ctx, const sr_val_t *value, char *buf)
 {
-    const struct lys_node *snode;
+    struct lys_node_leaf *sleaf;
 
     if (!value) {
         return NULL;
@@ -46,11 +46,14 @@ op_get_srval(struct ly_ctx *ctx, sr_val_t *value, char *buf)
         return value->data.bool_val ? "true" : "false";
     case SR_DECIMAL64_T:
         /* get fraction-digits */
-        snode = ly_ctx_get_node(ctx, NULL, value->xpath);
-        if (!snode) {
+        sleaf = (struct lys_node_leaf *)ly_ctx_get_node(ctx, NULL, value->xpath, 0);
+        if (!sleaf) {
             return NULL;
         }
-        sprintf(buf, "%.*f", ((struct lys_node_leaf *)snode)->type.info.dec64.dig, value->data.decimal64_val);
+        while (sleaf->type.base == LY_TYPE_LEAFREF) {
+            sleaf = sleaf->type.info.lref.target;
+        }
+        sprintf(buf, "%.*f", sleaf->type.info.dec64.dig, value->data.decimal64_val);
         return buf;
     case SR_UINT8_T:
         sprintf(buf, "%u", value->data.uint8_val);
@@ -80,44 +83,6 @@ op_get_srval(struct ly_ctx *ctx, sr_val_t *value, char *buf)
         return NULL;
     }
 
-}
-
-static int
-copy_bits(const struct lyd_node_leaf_list *leaf, char **dest)
-{
-    int i;
-    struct lys_node_leaf *sch = (struct lys_node_leaf *) leaf->schema;
-    char *bits_str = NULL;
-    int bits_count = sch->type.info.bits.count;
-    struct lys_type_bit **bits = leaf->value.bit;
-
-    size_t length = 1; /* terminating NULL byte*/
-    for (i = 0; i < bits_count; i++) {
-        if (NULL != bits[i] && NULL != bits[i]->name) {
-            length += strlen(bits[i]->name);
-            length++; /*space after bit*/
-        }
-    }
-    bits_str = calloc(length, sizeof(*bits_str));
-    if (NULL == bits_str) {
-        EMEM;
-        return -1;
-    }
-    size_t offset = 0;
-    for (i = 0; i < bits_count; i++) {
-        if (NULL != bits[i] && NULL != bits[i]->name) {
-            strcpy(bits_str + offset, bits[i]->name);
-            offset += strlen(bits[i]->name);
-            bits_str[offset] = ' ';
-            offset++;
-        }
-    }
-    if (0 != offset) {
-        bits_str[offset - 1] = '\0';
-    }
-
-    *dest = bits_str;
-    return 0;
 }
 
 int
@@ -153,7 +118,7 @@ settype:
         case LY_TYPE_BINARY:
             val->type = SR_BINARY_T;
             str = leaf->value.binary;
-            val->data.binary_val = (dup && str) ? strdup(str) : (char*)str;
+            val->data.binary_val = (dup && str) ? strdup(str) : (char *)str;
             if (NULL == val->data.binary_val) {
                 EMEM;
                 return -1;
@@ -161,10 +126,8 @@ settype:
             break;
         case LY_TYPE_BITS:
             val->type = SR_BITS_T;
-            if (copy_bits(leaf, &(val->data.bits_val))) {
-                ERR("Copy value failed for leaf '%s' of type 'bits'", leaf->schema->name);
-                return -1;
-            }
+            str = leaf->value_str;
+            val->data.bits_val = (dup && str) ? strdup(str) : (char *)str;
             break;
         case LY_TYPE_BOOL:
             val->type = SR_BOOL_T;
@@ -300,6 +263,21 @@ op_build_err_sr(struct nc_server_reply *ereply, sr_session_ctx_t *session)
     return ereply;
 }
 
+struct nc_server_reply *
+op_build_err_nacm(struct nc_server_reply *ereply)
+{
+    struct nc_server_error *e = NULL;
+
+    e = nc_err(NC_ERR_ACCESS_DENIED, NC_ERR_TYPE_PROT);
+    if (ereply) {
+        nc_server_reply_add_err(ereply, e);
+    } else {
+        ereply = nc_server_reply_err(e);
+    }
+
+    return ereply;
+}
+
 int
 op_filter_get_tree_from_data(struct lyd_node **root, struct lyd_node *data, const char *subtree_path)
 {
@@ -308,7 +286,7 @@ op_filter_get_tree_from_data(struct lyd_node **root, struct lyd_node *data, cons
     struct lys_node_list *slist;
     uint16_t i, j;
 
-    nodeset = lyd_find_xpath(data, subtree_path);
+    nodeset = lyd_find_path(data, subtree_path);
     for (i = 0; i < nodeset->number; ++i) {
         node = nodeset->set.d[i];
         tmp_root = lyd_dup(node, 1);
@@ -827,6 +805,80 @@ op_filter_create(struct lyd_node *filter_node, char ***filters, int *filter_coun
         if (op_filter_xpath_add_filter(path, filters, filter_count)) {
             free(path);
             return -1;
+        }
+    }
+
+    return 0;
+}
+
+int
+op_sr_val_to_lyd_node(struct lyd_node *root, const sr_val_t *sr_val, struct lyd_node **new_node)
+{
+    char numstr[22];
+    struct ly_set *set;
+    struct lyd_node *iter;
+    unsigned int u = 0;
+    char *str;
+
+    str = op_get_srval(np2srv.ly_ctx, sr_val, numstr);
+    if (!str) {
+        str = "";
+    }
+
+    ly_errno = LY_SUCCESS;
+    *new_node = lyd_new_path(root, np2srv.ly_ctx, sr_val->xpath, str, 0, LYD_PATH_OPT_UPDATE);
+    if (ly_errno) {
+        return -1;
+    }
+
+    if (*new_node) {
+        if (!root) {
+            root = *new_node;
+        }
+
+        /* propagate default flag */
+        if (sr_val->dflt) {
+            /* find the actual node supposed to be created */
+            set = lyd_find_path(root, sr_val->xpath);
+            if (!set) {
+                EINT;
+                return -1;
+            } else if (set->number > 1) {
+                /* leaf-list - find the corresponding node for the sr_val according to its value */
+                for (u = 0; u < set->number; u++) {
+                    if (!strcmp(str, ((struct lyd_node_leaf_list *)set->set.d[u])->value_str)) {
+                        break;
+                    }
+                }
+                if (u == set->number) {
+                    EINT;
+                    return -1;
+                }
+            } else {
+                u = 0;
+            }
+
+            if (set->set.d[u] == *new_node) {
+                (*new_node)->dflt = 1;
+            } else {
+                /* go up, back to the top-most created node */
+                for (iter = set->set.d[u]; iter != (*new_node)->parent; iter = iter->parent) {
+                    if (iter->schema->nodetype == LYS_CONTAINER && ((struct lys_node_container *)iter->schema)->presence) {
+                        /* presence container */
+                        break;
+                    } else if (iter->schema->nodetype == LYS_LIST && ((struct lys_node_list *)iter->schema)->keys_size) {
+                        /* list with keys */
+                        break;
+                    }
+                    iter->dflt = 1;
+                }
+            }
+
+            ly_set_free(set);
+        } else { /* non default node, propagate it to the parents */
+            for (iter = (*new_node)->parent; iter && iter->dflt; iter = iter->parent) {
+                iter->dflt = 0;
+            }
         }
     }
 

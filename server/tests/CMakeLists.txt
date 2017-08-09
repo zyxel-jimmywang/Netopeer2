@@ -1,16 +1,16 @@
 cmake_minimum_required(VERSION 2.6)
 
-set(tests test_close_session test_get test_generic test_copy_config test_edit_get_config test_un_lock test_notif)
+set(tests test_close_session test_get test_generic test_copy_config test_edit_get_config test_un_lock test_notif test_kill)
 
 set(test test_close_session)
-set(${test}_mock_funcs sr_connect sr_session_start sr_list_schemas sr_get_schema sr_module_install_subscribe sr_feature_enable_subscribe sr_module_change_subscribe sr_session_start_user sr_session_stop sr_disconnect nc_accept nc_session_free nc_server_endpt_count)
+set(${test}_mock_funcs sr_connect sr_session_start sr_list_schemas sr_get_schema sr_module_install_subscribe sr_feature_enable_subscribe sr_module_change_subscribe sr_session_start_user sr_session_stop sr_disconnect sr_event_notif_send nc_accept nc_session_free nc_server_endpt_count)
 set(${test}_wrap_link_flags "-Wl")
 foreach(mock_func IN LISTS ${test}_mock_funcs)
     set(${test}_wrap_link_flags "${${test}_wrap_link_flags},--wrap=${mock_func}")
 endforeach()
 
 set(test test_get)
-set(${test}_mock_funcs sr_session_refresh)
+set(${test}_mock_funcs sr_session_refresh sr_check_exec_permission)
 set(${test}_wrap_link_flags "-Wl")
 foreach(mock_func IN LISTS test_close_session_mock_funcs ${test}_mock_funcs)
     set(${test}_wrap_link_flags "${${test}_wrap_link_flags},--wrap=${mock_func}")
@@ -45,7 +45,14 @@ foreach(mock_func IN LISTS test_close_session_mock_funcs test_get_mock_funcs ${t
 endforeach()
 
 set(test test_notif)
-set(${test}_mock_funcs sr_event_notif_send sr_event_notif_subscribe_tree sr_event_notif_replay)
+set(${test}_mock_funcs sr_event_notif_subscribe sr_event_notif_replay sr_check_exec_permission)
+set(${test}_wrap_link_flags "-Wl")
+foreach(mock_func IN LISTS test_close_session_mock_funcs ${test}_mock_funcs)
+    set(${test}_wrap_link_flags "${${test}_wrap_link_flags},--wrap=${mock_func}")
+endforeach()
+
+set(test test_kill)
+set(${test}_mock_funcs sr_check_exec_permission)
 set(${test}_wrap_link_flags "-Wl")
 foreach(mock_func IN LISTS test_close_session_mock_funcs ${test}_mock_funcs)
     set(${test}_wrap_link_flags "${${test}_wrap_link_flags},--wrap=${mock_func}")
@@ -73,7 +80,7 @@ if(ENABLE_VALGRIND_TESTS)
     find_program(valgrind_FOUND valgrind)
     if(valgrind_FOUND)
         foreach(test_name IN LISTS tests)
-            add_test(${test_name}_valgrind valgrind --leak-check=full --show-leak-kinds=all
+            add_test(${test_name}_valgrind valgrind --leak-check=full --show-leak-kinds=all --error-exitcode=1
                  ${CMAKE_BINARY_DIR}/tests/${test_name})
         endforeach(test_name)
     else(valgrind_FOUND)

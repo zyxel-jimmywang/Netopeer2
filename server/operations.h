@@ -17,8 +17,6 @@
 
 #include <nc_server.h>
 
-extern uint16_t sr_subsc_count;
-
 struct np2srv_dslock {
     struct nc_session *running;
     time_t running_time;
@@ -44,14 +42,14 @@ enum NP2_EDIT_TESTOPT {
 };
 
 enum NP2_EDIT_DEFOP {
-    NP2_EDIT_DEFOP_NONE,
+    NP2_EDIT_DEFOP_NONE = 0,
     NP2_EDIT_DEFOP_MERGE,
     NP2_EDIT_DEFOP_REPLACE,
 };
 
 enum NP2_EDIT_OP {
     NP2_EDIT_ERROR = -1,
-    NP2_EDIT_NONE,
+    NP2_EDIT_NONE = 0,
     NP2_EDIT_MERGE,
     NP2_EDIT_CREATE,
     NP2_EDIT_REPLACE_INNER,
@@ -60,7 +58,7 @@ enum NP2_EDIT_OP {
     NP2_EDIT_REMOVE
 };
 
-char *op_get_srval(struct ly_ctx *ctx, sr_val_t *value, char *buf);
+char *op_get_srval(struct ly_ctx *ctx, const sr_val_t *value, char *buf);
 
 /**
  * @brief Fill sr_val_t for communication with sysrepo
@@ -81,10 +79,15 @@ int op_set_srval(struct lyd_node *node, char *path, int dup, sr_val_t *val, char
  * @brief Build error reply based on errors from sysrepo
  */
 struct nc_server_reply *op_build_err_sr(struct nc_server_reply *ereply, sr_session_ctx_t *session);
+/**
+ * @brief Build error reply because of NACM access denied
+ */
+struct nc_server_reply *op_build_err_nacm(struct nc_server_reply *ereply);
 
 int op_filter_get_tree_from_data(struct lyd_node **root, struct lyd_node *data, const char *subtree_path);
 int op_filter_xpath_add_filter(char *new_filter, char ***filters, int *filter_count);
 int op_filter_create(struct lyd_node *filter_node, char ***filters, int *filter_count);
+int op_sr_val_to_lyd_node(struct lyd_node *root, const sr_val_t *sr_val, struct lyd_node **new_node);
 
 struct nc_server_reply *op_get(struct lyd_node *rpc, struct nc_session *ncs);
 struct nc_server_reply *op_lock(struct lyd_node *rpc, struct nc_session *ncs);
@@ -96,12 +99,11 @@ struct nc_server_reply *op_commit(struct lyd_node *rpc, struct nc_session *ncs);
 struct nc_server_reply *op_discardchanges(struct lyd_node *rpc, struct nc_session *ncs);
 struct nc_server_reply *op_validate(struct lyd_node *rpc, struct nc_session *ncs);
 struct nc_server_reply *op_generic(struct lyd_node *rpc, struct nc_session *ncs);
+struct nc_server_reply *op_kill(struct lyd_node *rpc, struct nc_session *ncs);
 
 struct nc_server_reply *op_ntf_subscribe(struct lyd_node *rpc, struct nc_session *ncs);
-void op_ntf_unsubscribe(struct nc_session *session, int have_lock);
-void np2srv_ntf_send(struct lyd_node *ntf, const char *xpath, time_t timestamp, const sr_ev_notif_type_t notif_type);
-void np2srv_ntf_clb(const sr_ev_notif_type_t notif_type, const char *xpath, const sr_node_t *trees,
-                    const size_t tree_cnt, time_t timestamp, void *private_ctx);
+void op_ntf_unsubscribe(struct nc_session *session);
+void op_ntf_yang_lib_change(const struct lyd_node *ylib_info);
 struct lyd_node *ntf_get_data(void);
 
 
