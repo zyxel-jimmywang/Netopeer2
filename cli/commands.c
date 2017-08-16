@@ -1717,7 +1717,7 @@ cmd_cert(const char *arg, char **UNUSED(tmp_config_file))
             return EXIT_FAILURE;
         }
 
-        if ((asprintf(&dest, "%s/%s", trusted_dir, strrchr(path, '/') + 1) == -1)
+        if ((asprintf(&dest, "%s/%s", trusted_dir, basename(path)) == -1)
                 || (asprintf(&c_rehash_cmd, "c_rehash %s &> /dev/null", trusted_dir) == -1)) {
             ERROR("cert add", "Memory allocation failed");
             free(trusted_dir);
